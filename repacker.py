@@ -4,12 +4,13 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import track
 
+from jm_downloader.cbz_packer import CbzPacker
 from jm_downloader.config import DownloaderConfig, load_config_from_yaml
 from jm_downloader.db import JmDB
-from jm_downloader.cbz_packer import CbzPacker
 from jm_downloader.utils import setup_logging, clean_title_for_filename
 
 console = Console()
+
 
 def main():
     parser = argparse.ArgumentParser(description='JM Repacker - Repack existing folders with new metadata')
@@ -54,9 +55,9 @@ def main():
         return
 
     count = 0
-    
+
     console.log(f"[blue]开始扫描 {len(books)} 本已记录的书籍...[/blue]")
-    
+
     for aid, book in track(books.items(), description="Repacking..."):
         raw_title = book['title']
 
@@ -67,20 +68,20 @@ def main():
         # Legacy limit (default was 200 before)
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=True, max_len=200))
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=False, max_len=200))
-        
+
         found_path = None
         for cand in candidates:
             p = originals_dir / cand
             if p.exists() and p.is_dir():
                 found_path = p
                 break
-        
+
         if not found_path:
             continue
 
         cbz_base = cfg.out_dir / 'cbz' / found_path.name
         cbz_base.mkdir(parents=True, exist_ok=True)
-        authors_str = book['author'] 
+        authors_str = book['author']
         tags_str = book['tags']
         summary = book['description']
         # Full series name for metadata
@@ -89,7 +90,7 @@ def main():
         for chap_dir in found_path.iterdir():
             if not chap_dir.is_dir():
                 continue
-                
+
             chap_name = chap_dir.name
 
             import re
@@ -97,9 +98,9 @@ def main():
             m = re.search(r'第(\d+)话', chap_name)
             if m:
                 num = float(m.group(1))
-            
+
             cbz_file = cbz_base / f"{chap_name}.cbz"
-            
+
             try:
                 CbzPacker.pack_images_to_cbz(
                     images_folder=chap_dir,
@@ -115,10 +116,11 @@ def main():
                 db.mark_packed(aid, chap_name)
             except Exception as e:
                 console.print(f"[red]打包失败 {found_path.name}/{chap_name}: {e}[/red]")
-        
+
         count += 1
 
     console.log(f"[green]重打包完成，共处理 {count} 本[/green]")
+
 
 if __name__ == '__main__':
     main()

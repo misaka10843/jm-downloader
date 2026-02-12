@@ -1,7 +1,5 @@
 import logging
 import re
-from pathlib import Path
-from logging.handlers import RotatingFileHandler
 
 from rich.logging import RichHandler
 
@@ -55,6 +53,7 @@ def truncate_by_bytes(s: str, max_bytes: int) -> str:
         return s
     return encoded[:max_bytes].decode('utf-8', 'ignore').strip()
 
+
 def sanitize_filename(name: str, max_len: int = 180) -> str:
     if not name:
         return "untitled"
@@ -64,15 +63,15 @@ def sanitize_filename(name: str, max_len: int = 180) -> str:
     s = s.rstrip(". ")
     if not s:
         return "untitled"
-    
+
     # 1. Truncate by characters first (fast loose check)
     if len(s) > max_len:
         s = s[:max_len].rstrip()
-        
+
     # 2. Truncate by bytes (strict filesystem check)
     # 255 bytes is standard limit. We use 230 to allow for suffix/extension/path overhead.
     s = truncate_by_bytes(s, 230)
-    
+
     up = s.upper()
     if up in _WINDOWS_RESERVED:
         s = "_" + s
@@ -104,12 +103,12 @@ def setup_logging():
             RichHandler(rich_tracebacks=True, markup=True)
         ]
     )
-    
+
     # Suppress jmcomic INFO
     # jmcomic uses valid logger names usually? 
     # If not sure, we can suppress common ones or check usage.
     # Assuming 'jmcomic' is the logger name.
     logging.getLogger('jmcomic').setLevel(logging.WARNING)
-    
+
     # Silence requests/urllib3 info too commonly
     logging.getLogger('urllib3').setLevel(logging.WARNING)

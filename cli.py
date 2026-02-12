@@ -1,17 +1,16 @@
 import argparse
-import sys
 from pathlib import Path
-from typing import List
 
 from rich.console import Console
 from rich.table import Table
 
 from jm_downloader.config import DownloaderConfig, load_config_from_yaml
-from jm_downloader.downloader import JmFavDownloader
 from jm_downloader.db import JmDB
+from jm_downloader.downloader import JmFavDownloader
 from jm_downloader.utils import setup_logging
 
 console = Console()
+
 
 # Todo: 可能需要优化作者名(因为很多本子的作者名会出现 名称(名称2))
 def check_updates(cfg: DownloaderConfig):

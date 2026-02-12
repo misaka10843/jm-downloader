@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from cbz.comic import ComicInfo
 from cbz.constants import PageType, Format
