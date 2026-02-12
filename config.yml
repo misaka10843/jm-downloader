@@ -1,0 +1,7 @@
+out_dir: ./jm_downloads
+retries: 3
+delete_after_pack: false
+extract_title: false
+download_favorites: true
+jm_option_file: null  # 若你有 jmcomic 的 option.yml，可指定
+save_db: ./downloads_db.sqlite
