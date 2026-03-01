@@ -32,7 +32,7 @@ def main():
         save_db=Path(cfg_data.get('save_db', './downloads_db.sqlite'))
     )
 
-    setup_logging(cfg.out_dir / 'repacker.log')
+    setup_logging()
     db = JmDB(cfg.save_db)
 
     console.log("[blue]读取数据库中书籍信息...[/blue]")
@@ -62,10 +62,8 @@ def main():
         raw_title = book['title']
 
         candidates = set()
-        # New strict limit
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=True, max_len=180))
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=False, max_len=180))
-        # Legacy limit (default was 200 before)
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=True, max_len=200))
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=False, max_len=200))
 
@@ -84,7 +82,6 @@ def main():
         authors_str = book['author']
         tags_str = book['tags']
         summary = book['description']
-        # Full series name for metadata
         cbz_series = clean_title_for_filename(raw_title, extract_brackets=cfg.extract_title, max_len=999)
 
         for chap_dir in found_path.iterdir():

@@ -1,6 +1,8 @@
 import logging
+import random
 import re
 import shutil
+import time
 from pathlib import Path
 from typing import List
 
@@ -30,11 +32,12 @@ def req_api_with_auto_relogin(self, url, *args, **kwargs):
 
             username = getattr(self, '_username', None)
             password = getattr(self, '_password_for_relogin', None)
-
+            time.sleep(random.randint(1, 3))
             if username and password:
                 try:
                     self.login(username, password)
                     console.log(f"[green][Auto-Relogin] 重新登录成功，正在重新请求...[/green]")
+                    time.sleep(random.randint(1, 3))
                     return original_req_api(self, url, *args, **kwargs)
                 except Exception as login_e:
                     console.log(f"[red][Auto-Relogin] 重新登录失败: {login_e}[/red]")
@@ -85,53 +88,64 @@ class JmFavDownloader:
             return []
 
         console.log('[blue]正在检查收藏夹更新...[/blue]')
-        latest_online_id = None
-        try:
-            gen = self.client.favorite_folder_gen()
-            first_page_ids = []
-            for page in gen:
-                for aid, _ in page.iter_id_title():
-                    first_page_ids.append(str(aid))
-                break
 
-            if first_page_ids:
-                latest_online_id = first_page_ids[0]
-        except Exception as e:
-            console.log(f'[red]获取收藏夹失败: {e}[/red]')
-            return []
-
-        if not latest_online_id:
-            console.log('[yellow]收藏夹为空 or 获取失败[/yellow]')
-            return []
-
+        cached_list = self.db.get_fav_list() or []
         cached_latest_id = self.db.get_fav_latest_id()
-        cached_list = self.db.get_fav_list()
 
-        if cached_latest_id == latest_online_id and cached_list:
-            console.log(f'[green]收藏夹无变化 (最新ID: {latest_online_id})，使用缓存列表[/green]')
-            return cached_list
+        stop_marker_ids = set(cached_list[:3])
 
-        console.log(f'[blue]发现新收藏 (旧: {cached_latest_id}, 新: {latest_online_id})，重新获取全部收藏...[/blue]')
+        new_album_ids = []
+        latest_online_id = None
+        reached_cache = False
 
-        album_ids = []
         with Progress(SpinnerColumn(), TextColumn('[progress.description]{task.description}'), console=console) as prog:
             task = prog.add_task('获取收藏中...', total=None)
             try:
                 for page in self.client.favorite_folder_gen():
                     for aid, title in page.iter_id_title():
-                        if str(aid) not in album_ids:
-                            album_ids.append(str(aid))
-                    prog.update(task, description=f'已收集: {len(album_ids)} 本')
-                prog.update(task, description=f'收藏抓取完成，共 {len(album_ids)} 本')
+                        aid_str = str(aid)
 
-                # 更新缓存
-                self.db.set_fav_latest_id(latest_online_id)
-                self.db.set_fav_list(album_ids)
+                        if latest_online_id is None:
+                            latest_online_id = aid_str
+                            if latest_online_id == cached_latest_id:
+                                reached_cache = True
+                                break
+
+                        if aid_str in stop_marker_ids:
+                            reached_cache = True
+                            break
+
+                        if aid_str not in new_album_ids:
+                            new_album_ids.append(aid_str)
+
+                    prog.update(task, description=f'已收集新收藏: {len(new_album_ids)} 本')
+
+                    if reached_cache:
+                        break
 
             except Exception as e:
                 console.log(f'[red]获取收藏夹失败: {e}[/red]')
-                return []
-        return album_ids
+                return cached_list
+
+        if not latest_online_id:
+            console.log('[yellow]收藏夹为空 or 获取失败[/yellow]')
+            return cached_list
+
+        if len(new_album_ids) == 0:
+            console.log(f'[green]收藏夹无变化 (最新ID: {latest_online_id})，使用缓存列表[/green]')
+            return cached_list
+
+        console.log(f'[blue]发现新收藏，新增了 {len(new_album_ids)} 本，正在与本地缓存合并...[/blue]')
+
+        final_album_ids = new_album_ids.copy()
+        for aid in cached_list:
+            if aid not in final_album_ids:
+                final_album_ids.append(aid)
+
+        self.db.set_fav_latest_id(latest_online_id)
+        self.db.set_fav_list(final_album_ids)
+
+        return final_album_ids
 
     def download_album_list(self, album_ids: List[str]):
         if not album_ids:
