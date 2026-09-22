@@ -1,0 +1,65 @@
+name: Build Linux Binary
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    name: Build Linux x86_64
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Build with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: cli.py
+          mode: onefile
+          output-dir: build
+          output-file: jm-downloader-linux-x86_64.bin
+
+          # jmcomic 这类库可能带有运行时数据文件，
+          # 一起带上可以减少 onefile 运行时缺文件的概率
+          include-package-data: jmcomic
+
+          # 并行编译
+          jobs: 4
+
+          # 允许 Nuitka 自动获取所需构建组件
+          assume-yes-for-downloads: true
+
+      - name: Test binary
+        run: |
+          chmod +x build/jm-downloader-linux-x86_64.bin
+          ./build/jm-downloader-linux-x86_64.bin --help
+
+      - name: Upload Linux Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: jm-downloader-linux-x86_64
+          path: build/jm-downloader-linux-x86_64.bin
+          if-no-files-found: error
