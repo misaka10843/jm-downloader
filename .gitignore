@@ -182,3 +182,8 @@ cython_debug/
 *.sqlite
 *.sqlite.bak
 *.json
+
+# 生成的 UI 页面（jm ui / jm search 输出目录）
+jm_ui/
+# 仓库自带 config.yml 里 out_dir 指向的目录，从仓库根目录跑会生成
+jm_downloads/

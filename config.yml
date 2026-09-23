@@ -1,6 +1,14 @@
 out_dir: ./jm_downloads
+# CBZ 打包产物输出目录，留空/不写则使用 out_dir/cbz
+cbz_dir: null
+# 原始图片目录，留空/不写则使用 out_dir/originals
+originals_dir: null
+# 单张图片的总尝试次数（含第一次），最小 1；写成 0 会一次都不尝试
 retries: 3
+# 打包成功后是否删除对应原图（可显著节省空间，删除后无法再用 repacker 重新打包）
 delete_after_pack: false
+# 配合 delete_after_pack：章节全部删除后，是否一并清理留下的空本子目录
+delete_empty_album_dir: true
 extract_title: false
 download_favorites: true
 jm_option_file: null  # 若你有 jmcomic 的 option.yml，可指定

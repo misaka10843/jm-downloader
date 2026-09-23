@@ -1,36 +1,58 @@
 import argparse
+import re
+import shutil
 from pathlib import Path
 
 from rich.console import Console
 from rich.progress import track
 
 from jm_downloader.cbz_packer import CbzPacker
-from jm_downloader.config import DownloaderConfig, load_config_from_yaml
+from jm_downloader.config import build_config, load_config_from_yaml, resolve_config_path
 from jm_downloader.db import JmDB
-from jm_downloader.utils import setup_logging, clean_title_for_filename
+from jm_downloader.utils import setup_logging, clean_title_for_filename, legacy_clean_title_for_filename
 
 console = Console()
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='JM Repacker - Repack existing folders with new metadata')
     parser.add_argument('--config', '-c', help='YAML 配置文件路径', default=None)
-    args = parser.parse_args()
+    parser.add_argument('--username', '-u', help='JM 登录用户名', default=None)
+    parser.add_argument('--password', '-p', help='JM 登录密码', default=None)
+    parser.add_argument('--cbz-dir', help='CBZ 输出目录（覆盖配置文件）', default=None)
+    parser.add_argument('--originals-dir', help='原图目录（覆盖配置文件）', default=None)
+    parser.add_argument('--delete-after-pack', action='store_true', help='打包成功后删除对应原图')
+    parser.add_argument('--keep-originals', action='store_true', help='打包后保留原图（覆盖配置文件）')
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
 
     # Load Config to get paths
-    cfg_data = load_config_from_yaml(args.config)
-    cfg = DownloaderConfig(
-        out_dir=Path(cfg_data.get('out_dir', './downloads')),
-        retries=int(cfg_data.get('retries', 3)),
-        delete_after_pack=bool(cfg_data.get('delete_after_pack', False)),
-        extract_title=bool(cfg_data.get('extract_title', False)),
-        jm_option_file=Path(cfg_data['jm_option_file']) if cfg_data.get('jm_option_file') else None,
-        username=args.username or cfg_data.get('username'),
-        password=args.password or cfg_data.get('password'),
+    try:
+        config_path = resolve_config_path(args.config)
+        if config_path and not args.config:
+            console.log(f"[blue]未指定 -c，自动读取 {config_path}[/blue]")
+        cfg_data = load_config_from_yaml(config_path)
+    except (FileNotFoundError, IsADirectoryError, ValueError) as e:
+        console.log(f"[red]配置有误: {e}[/red]")
+        return
+    cfg = build_config(
+        cfg_data,
+        username=args.username,
+        password=args.password,
         download_favorites=False,
         album_ids=[],
-        save_db=Path(cfg_data.get('save_db', './downloads_db.sqlite'))
     )
+    if args.cbz_dir:
+        cfg.cbz_dir = Path(args.cbz_dir)
+    if args.originals_dir:
+        cfg.originals_dir = Path(args.originals_dir)
+    if args.keep_originals:
+        cfg.delete_after_pack = False
+    elif args.delete_after_pack:
+        cfg.delete_after_pack = True
 
     setup_logging()
     db = JmDB(cfg.save_db)
@@ -49,10 +71,15 @@ def main():
         console.log("[yellow]数据库为空，无法进行元数据匹配重打包[/yellow]")
         return
 
-    originals_dir = cfg.out_dir / 'originals'
+    originals_dir = cfg.originals_root
     if not originals_dir.exists():
         console.log(f"[red]找不到原来的图片目录: {originals_dir}[/red]")
         return
+
+    console.log(f"[blue]原图目录: {originals_dir}[/blue]")
+    console.log(f"[blue]CBZ 输出目录: {cfg.cbz_root}[/blue]")
+    if cfg.delete_after_pack:
+        console.log("[yellow]已开启打包后删除原图 (delete_after_pack)[/yellow]")
 
     count = 0
 
@@ -66,31 +93,46 @@ def main():
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=False, max_len=180))
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=True, max_len=200))
         candidates.add(clean_title_for_filename(raw_title, extract_brackets=False, max_len=200))
+        # 兼容旧版本括号清洗规则生成的历史目录名
+        candidates.add(legacy_clean_title_for_filename(raw_title, max_len=180))
+        candidates.add(legacy_clean_title_for_filename(raw_title, max_len=200))
 
         found_path = None
-        for cand in candidates:
-            p = originals_dir / cand
+
+        # 先按库里的记录找：下载时若目录名冲突会被追加 [album_id]，那种名字不在候选里。
+        # 候选集合是无序的，所以这里必须优先判断。
+        try:
+            recorded_dir = db.get_album_dir_name(aid)
+        except Exception:
+            recorded_dir = None
+        if recorded_dir:
+            p = originals_dir / recorded_dir
             if p.exists() and p.is_dir():
                 found_path = p
-                break
+
+        if not found_path:
+            for cand in candidates:
+                p = originals_dir / cand
+                if p.exists() and p.is_dir():
+                    found_path = p
+                    break
 
         if not found_path:
             continue
 
-        cbz_base = cfg.out_dir / 'cbz' / found_path.name
+        cbz_base = cfg.cbz_root / found_path.name
         cbz_base.mkdir(parents=True, exist_ok=True)
         authors_str = book['author']
         tags_str = book['tags']
         summary = book['description']
         cbz_series = clean_title_for_filename(raw_title, extract_brackets=cfg.extract_title, max_len=999)
 
-        for chap_dir in found_path.iterdir():
+        for chap_dir in list(found_path.iterdir()):
             if not chap_dir.is_dir():
                 continue
 
             chap_name = chap_dir.name
 
-            import re
             num = 1.0
             m = re.search(r'第(\d+)话', chap_name)
             if m:
@@ -111,8 +153,20 @@ def main():
                     album_id=aid
                 )
                 db.mark_packed(aid, chap_name)
+                if cfg.delete_after_pack:
+                    shutil.rmtree(chap_dir, ignore_errors=True)
+                    console.print(f"[grey]已删除原图文件夹: {chap_dir}[/grey]")
             except Exception as e:
                 console.print(f"[red]打包失败 {found_path.name}/{chap_name}: {e}[/red]")
+
+        # 章节全部删除后，清理本子留下的空目录
+        if cfg.delete_after_pack and cfg.delete_empty_album_dir:
+            try:
+                if found_path.exists() and not any(found_path.iterdir()):
+                    found_path.rmdir()
+                    console.print(f"[grey]已删除空的原始目录: {found_path}[/grey]")
+            except OSError:
+                pass
 
         count += 1
 
